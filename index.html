@@ -593,12 +593,36 @@
         }
 
         async function apiCall(action, params = {}, postData = null) {
-            let url = `${API_URL}?action=${action}`;
-            for (const key in params) url += `&${key}=${encodeURIComponent(params[key])}`;
+            // action + query params
+            let url = `${API_URL}?action=${encodeURIComponent(action)}`;
+            for (const key in params) {
+                url += `&${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`;
+            }
+
             const options = { method: postData ? 'POST' : 'GET' };
-            if (postData) { options.headers = { 'Content-Type': 'application/json' }; options.body = JSON.stringify(postData); }
+
+            // Evita CORS/preflight: envia como x-www-form-urlencoded (não JSON)
+            if (postData) {
+                options.headers = { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' };
+
+                const clean = {};
+                for (const [k, v] of Object.entries(postData)) {
+                    if (v !== undefined && v !== null) clean[k] = v;
+                }
+                options.body = new URLSearchParams(clean).toString();
+            }
+
             const response = await fetch(url, options);
-            const result = await response.json();
+
+            // Lê como texto e tenta JSON (evita quebrar se vier HTML/erro)
+            const text = await response.text();
+            let result;
+            try {
+                result = JSON.parse(text);
+            } catch (e) {
+                throw new Error(`Resposta não é JSON. Status ${response.status}. Conteúdo: ${text.slice(0, 200)}`);
+            }
+
             if (result.error) throw new Error(result.error);
             return result;
         }
@@ -681,21 +705,21 @@
         function closeModal(type) { document.getElementById(`modal-${type}`).classList.remove('active'); }
         document.querySelectorAll('.modal').forEach(m => { m.addEventListener('click', e => { if (e.target === m) m.classList.remove('active'); }); });
 
-        async function saveDespesa(e) { e.preventDefault(); const id = document.getElementById('despesa-id').value; const d = { id: id || undefined, ano: anoAtual, data: new Date().toISOString().split('T')[0], mes: document.getElementById('despesa-mes').value, ciclo_fatura: document.getElementById('despesa-ciclo').value, categoria: document.getElementById('despesa-categoria').value, descricao: document.getElementById('despesa-descricao').value, valor: document.getElementById('despesa-valor').value, parcela: document.getElementById('despesa-parcela').value, cartao: document.getElementById('despesa-cartao').value, vencimento: document.getElementById('despesa-vencimento').value, observacoes: document.getElementById('despesa-obs').value, status: 'Não Pago' }; setSyncing(true); try { if (id) { const ex = despesas.find(x => x.id == id); d.status = ex?.status || 'Não Pago'; await apiCall('updateDespesa', {}, d); } else { await apiCall('addDespesa', {}, d); } await loadAllData(); closeModal('despesa'); toast(id ? 'Atualizado!' : 'Adicionado!', 'success'); } catch (err) { toast('Erro', 'error'); setSyncing(false, true); } }
+        async function saveDespesa(e) { e.preventDefault(); const id = document.getElementById('despesa-id').value; const d = { id: id || undefined, ano: anoAtual, data: new Date().toISOString().split('T')[0], mes: document.getElementById('despesa-mes').value, ciclo_fatura: document.getElementById('despesa-ciclo').value, categoria: document.getElementById('despesa-categoria').value, descricao: document.getElementById('despesa-descricao').value, valor: document.getElementById('despesa-valor').value, parcela: document.getElementById('despesa-parcela').value, cartao: document.getElementById('despesa-cartao').value, vencimento: document.getElementById('despesa-vencimento').value, observacoes: document.getElementById('despesa-obs').value, status: 'Não Pago' }; setSyncing(true); try { if (id) { const ex = despesas.find(x => x.id == id); d.status = ex?.status || 'Não Pago'; await apiCall('updateDespesa', {}, d); } else { await apiCall('addDespesa', {}, d); } await loadAllData(); closeModal('despesa'); toast(id ? 'Atualizado!' : 'Adicionado!', 'success'); } catch (err) { console.error(err); toast(err.message || 'Erro', 'error'); setSyncing(false, true); } }
         function editDespesa(id) { const d = despesas.find(x => x.id == id); if (d) openModal('despesa', d); }
-        async function deleteDespesa(id) { if (!confirm('Excluir?')) return; setSyncing(true); try { await apiCall('deleteDespesa', { id, ano: anoAtual }); await loadAllData(); toast('Excluído!', 'success'); } catch (err) { toast('Erro', 'error'); setSyncing(false, true); } }
-        async function toggleDespesaStatus(id) { const d = despesas.find(x => x.id == id); if (!d) return; d.status = d.status === 'Pago' ? 'Não Pago' : 'Pago'; d.ano = anoAtual; setSyncing(true); try { await apiCall('updateDespesa', {}, d); await loadAllData(); } catch (err) { toast('Erro', 'error'); setSyncing(false, true); } }
+        async function deleteDespesa(id) { if (!confirm('Excluir?')) return; setSyncing(true); try { await apiCall('deleteDespesa', { id, ano: anoAtual }); await loadAllData(); toast('Excluído!', 'success'); } catch (err) { console.error(err); toast(err.message || 'Erro', 'error'); setSyncing(false, true); } }
+        async function toggleDespesaStatus(id) { const d = despesas.find(x => x.id == id); if (!d) return; d.status = d.status === 'Pago' ? 'Não Pago' : 'Pago'; d.ano = anoAtual; setSyncing(true); try { await apiCall('updateDespesa', {}, d); await loadAllData(); } catch (err) { console.error(err); toast(err.message || 'Erro', 'error'); setSyncing(false, true); } }
 
-        async function saveEntrada(e) { e.preventDefault(); const id = document.getElementById('entrada-id').value; const en = { id: id || undefined, ano: anoAtual, data: document.getElementById('entrada-data').value, mes: document.getElementById('entrada-mes').value, categoria: document.getElementById('entrada-categoria').value, descricao: document.getElementById('entrada-descricao').value, valor: document.getElementById('entrada-valor').value, recorrente: document.getElementById('entrada-recorrente').value, observacoes: document.getElementById('entrada-obs').value }; setSyncing(true); try { if (id) { await apiCall('updateEntrada', {}, en); } else { await apiCall('addEntrada', {}, en); } await loadAllData(); closeModal('entrada'); toast(id ? 'Atualizado!' : 'Adicionado!', 'success'); } catch (err) { toast('Erro', 'error'); setSyncing(false, true); } }
+        async function saveEntrada(e) { e.preventDefault(); const id = document.getElementById('entrada-id').value; const en = { id: id || undefined, ano: anoAtual, data: document.getElementById('entrada-data').value, mes: document.getElementById('entrada-mes').value, categoria: document.getElementById('entrada-categoria').value, descricao: document.getElementById('entrada-descricao').value, valor: document.getElementById('entrada-valor').value, recorrente: document.getElementById('entrada-recorrente').value, observacoes: document.getElementById('entrada-obs').value }; setSyncing(true); try { if (id) { await apiCall('updateEntrada', {}, en); } else { await apiCall('addEntrada', {}, en); } await loadAllData(); closeModal('entrada'); toast(id ? 'Atualizado!' : 'Adicionado!', 'success'); } catch (err) { console.error(err); toast(err.message || 'Erro', 'error'); setSyncing(false, true); } }
         function editEntrada(id) { const e = entradas.find(x => x.id == id); if (e) openModal('entrada', e); }
-        async function deleteEntrada(id) { if (!confirm('Excluir?')) return; setSyncing(true); try { await apiCall('deleteEntrada', { id, ano: anoAtual }); await loadAllData(); toast('Excluído!', 'success'); } catch (err) { toast('Erro', 'error'); setSyncing(false, true); } }
+        async function deleteEntrada(id) { if (!confirm('Excluir?')) return; setSyncing(true); try { await apiCall('deleteEntrada', { id, ano: anoAtual }); await loadAllData(); toast('Excluído!', 'success'); } catch (err) { console.error(err); toast(err.message || 'Erro', 'error'); setSyncing(false, true); } }
 
-        async function saveFixa(e) { e.preventDefault(); const id = document.getElementById('fixa-id').value; const f = { id: id || undefined, descricao: document.getElementById('fixa-descricao').value, valor: document.getElementById('fixa-valor').value, dia_vencimento: document.getElementById('fixa-vencimento').value, tipo_pagamento: document.getElementById('fixa-tipo').value, categoria: document.getElementById('fixa-categoria').value, ativo: 'Sim' }; setSyncing(true); try { if (id) { const ex = fixas.find(x => x.id == id); f.ativo = ex?.ativo || 'Sim'; await apiCall('updateFixa', {}, f); } else { await apiCall('addFixa', {}, f); } await loadAllData(); closeModal('fixa'); toast(id ? 'Atualizado!' : 'Adicionado!', 'success'); } catch (err) { toast('Erro', 'error'); setSyncing(false, true); } }
+        async function saveFixa(e) { e.preventDefault(); const id = document.getElementById('fixa-id').value; const f = { id: id || undefined, descricao: document.getElementById('fixa-descricao').value, valor: document.getElementById('fixa-valor').value, dia_vencimento: document.getElementById('fixa-vencimento').value, tipo_pagamento: document.getElementById('fixa-tipo').value, categoria: document.getElementById('fixa-categoria').value, ativo: 'Sim' }; setSyncing(true); try { if (id) { const ex = fixas.find(x => x.id == id); f.ativo = ex?.ativo || 'Sim'; await apiCall('updateFixa', {}, f); } else { await apiCall('addFixa', {}, f); } await loadAllData(); closeModal('fixa'); toast(id ? 'Atualizado!' : 'Adicionado!', 'success'); } catch (err) { console.error(err); toast(err.message || 'Erro', 'error'); setSyncing(false, true); } }
         function editFixa(id) { const f = fixas.find(x => x.id == id); if (f) openModal('fixa', f); }
-        async function deleteFixa(id) { if (!confirm('Excluir?')) return; setSyncing(true); try { await apiCall('deleteFixa', { id }); await loadAllData(); toast('Excluído!', 'success'); } catch (err) { toast('Erro', 'error'); setSyncing(false, true); } }
-        async function toggleFixaAtivo(id) { const f = fixas.find(x => x.id == id); if (!f) return; f.ativo = f.ativo === 'Não' ? 'Sim' : 'Não'; setSyncing(true); try { await apiCall('updateFixa', {}, f); await loadAllData(); } catch (err) { toast('Erro', 'error'); setSyncing(false, true); } }
+        async function deleteFixa(id) { if (!confirm('Excluir?')) return; setSyncing(true); try { await apiCall('deleteFixa', { id }); await loadAllData(); toast('Excluído!', 'success'); } catch (err) { console.error(err); toast(err.message || 'Erro', 'error'); setSyncing(false, true); } }
+        async function toggleFixaAtivo(id) { const f = fixas.find(x => x.id == id); if (!f) return; f.ativo = f.ativo === 'Não' ? 'Sim' : 'Não'; setSyncing(true); try { await apiCall('updateFixa', {}, f); await loadAllData(); } catch (err) { console.error(err); toast(err.message || 'Erro', 'error'); setSyncing(false, true); } }
 
-        async function saveConfig() { const c = { metaMensal: document.getElementById('config-meta').value }; try { await apiCall('saveConfig', {}, c); config = c; toast('Salvo!', 'success'); } catch (err) { toast('Erro', 'error'); } }
+        async function saveConfig() { const c = { metaMensal: document.getElementById('config-meta').value }; try { await apiCall('saveConfig', {}, c); config = c; toast('Salvo!', 'success'); } catch (err) { console.error(err); toast(err.message || 'Erro', 'error'); } }
         function syncData() { loadAllData(); }
     </script>
 </body>
